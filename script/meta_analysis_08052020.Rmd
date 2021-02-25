@@ -1,0 +1,768 @@
+---
+title: "Meta-Analysis_Aug2020"
+author: "Brianne"
+date: "8/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Hypothesis 
+1. Fire will reduce the cover of biocrusts 
+2. Biocrust composition will be the most exaplanatory variable for biocrust response to fire. Early succussional biocrusts will have a more positive response to fire.  
+3. TSF and Fire Type will be important moderating variables. Biocrust cover will increase with TSF. Wildfire will reduce the cover of biocrusts more than prescribed burns.  
+
+```{R load libraries}
+
+library(tidyverse)
+library(metafor)
+library(dismo)
+library(gbm)
+library(ggpubr)
+library(patchwork)
+
+
+```
+
+Methods: 
+In total I used 237 unique experiments from twenty individual studies spanning 1984 to 2019 with one unpublished study from Palmer et al. that explicily tested changes in biocurst cover after prescribed and wildfire. Ecosystem, fire type, plot size, and biocrust type were extracted from the original papers. Fire Regime data was available for the experiments performed in the United State from the LandFire map layer. Climate variables including aridity, average temperature, average precipitation, average radiation, and average wind speed were extracted from the corresponding map layers on ArcMap using the GPS coordinates listed in the corresponding papers. Experiments were also grouped by their successional state. Algae and cyanobacteria were characterized as early successional, lichens and mosses were characterized as late successional, unknown and mixed biocrusts were characterized as unknown. 
+
+```{R load data}
+cover <- read.csv("C:/Users/Brianne/OneDrive - San Diego State University (SDSU.EDU)/R WorkBooks/MetaAnalysis/data/FireMA_June2020.csv") # control is unburned
+# make TSF a number
+cover$TSF <- as.integer(cover$TSF)
+cover <- cover[-(7)]
+
+#cover <- cover %>% filter(ï..Authors != "Palmer")
+
+#cover <- cover %>% filter(ï..Authors != "Strong")
+
+``` 
+
+```{r group by successional group}
+
+# cyanobacteria = 15
+# algae = 8
+# lichen = 116
+# liverwort = 5
+# mixed = 3
+# moss = 59
+# NA = 25
+
+early <- cover %>% filter(crustType %in% c("cyanobacteria", "algae"))
+early$Succession <- rep("early", n=25)
+late <- cover %>% filter(crustType %in% c("lichen", "bryophyte"))
+late$Succession <- rep("late", n = 184)
+unknown <- cover %>% filter(crustType %in% c("unknown", "mixed"))
+unknown$Succession <- rep("unknown", n = 28)
+
+early.late <- full_join(early, late)
+cover <- full_join(early.late, unknown)
+
+
+```
+
+In order to understand how the moderating variables may influnce the burned and control biocrust cover. I performed two Boosted Regression Trees, one for each treatment. I found the RMSE, MAE, and R-sq for each BRT to assess the accuracy of the model. The tree complexity was set to 5, the learning rate was set to 0.01 and the bag fraction was set to 0.5. 
+
+```{R Biocrust Boosted Regression Trees}
+
+brt.cover.data <- cover[-c(1:2, 16, 17)] # remove max and min temperature 
+brt.cover.data$studyID <- as.factor(brt.cover.data$studyID)
+brt.cover.data$Ecosystem <- as.factor(brt.cover.data$Ecosystem)
+brt.cover.data$Exp.Type <- as.factor(brt.cover.data$Exp.Type)
+brt.cover.data$Fire_Type <- as.factor(brt.cover.data$Fire_Type)
+brt.cover.data$PlotSize.m.2. <- as.factor(brt.cover.data$PlotSize.m.2.)
+brt.cover.data$crustType <- as.factor(brt.cover.data$crustType)
+brt.cover.data$Location <- as.factor(brt.cover.data$Location)
+brt.cover.data$Duration <- as.factor(brt.cover.data$Duration)
+
+# fit the model 
+
+# tree complexity 5 and learning rate of 0.01
+
+brt.burn.cover <- gbm.step(data=brt.cover.data, gbm.x = c(4:17), gbm.y = 18, family = "gaussian", tree.complexity = 5,learning.rate = 0.01, bag.fraction = 0.5)
+summary(brt.burn.cover)
+
+brt.control.cover <- gbm.step(data=brt.cover.data, gbm.x = c(4:17, 25), gbm.y = 21, family = "gaussian", tree.complexity = 5,learning.rate = 0.01, bag.fraction = 0.5)
+
+```
+
+
+
+RMSE, MAE, R-Sq for BRT Burn 
+
+```{r Fucntions }
+# Function that returns Root Mean Squared Error
+RMSE <- function(error)
+{
+    sqrt(mean(error^2))
+}
+ 
+# Function that returns Mean Absolute Error
+MAE <- function(error)
+{
+    mean(abs(error))
+}
+```
+
+```{r BRT RMSE}
+brt.burn.rmse <- RMSE(brt.burn.cover$residuals)
+brt.burn.rmse
+
+```
+
+BRT RMSE = 5.528828
+RMSE is in the same unit as the DV, in this case, total cover(integer from 0-100)
+```{r BRT MAE}
+brt.burn.mae <- MAE(brt.burn.cover$residuals)
+brt.burn.mae
+
+```
+BRT MAE =2.965856
+
+```{r BRT R2}
+total.mean <- mean(brt.cover.data$Burn.Cover)
+tss <- sum((brt.cover.data$Burn.Cover - total.mean)^2)
+rss <- sum(brt.burn.cover$residuals^2)
+brt.burn.rsq <- 1-(rss/tss)
+brt.burn.rsq
+
+```
+BRT burn R-sq =  0.8669573
+```{r BRT Control RMSE}
+brt.control.rmse <- RMSE(brt.control.cover$residuals)
+brt.control.rmse
+
+```
+BRT RMSE = 7.863811
+RMSE is in the same unit as the DV, in this case, total cover(integer from 0-100)
+```{r BRT MAE}
+brt.control.mae <- MAE(brt.control.cover$residuals)
+brt.control.mae
+
+```
+BRT MAE = 4.575778
+
+```{r BRT R2}
+total.mean <- mean(brt.cover.data$Cont.Cover)
+tss <- sum((brt.cover.data$Cont.Cover - total.mean)^2)
+rss <- sum(brt.control.cover$residuals^2)
+brt.control.rsq <- 1-(rss/tss)
+brt.control.rsq
+
+```
+R sq =  0.8384392
+
+
+In general, the BRT performed slightly better in predicting the moderating variables for the burned biocrust cover. This makes sense because the control biocrusts were not burned in the fires. For the burned BRT, the BRT suggested we drop Experiment Type and Ecosystem. 
+
+
+Next, I used the gbm.simplify model to determine if there are any variables I should remove from the model to improve it. And used the interaction function to look for interactions between the variables. When the variables interacted in the
+
+
+```{R simplifly model}
+brt.simp.drop <- gbm.simplify(brt.burn.cover, n.drops = 5)
+# number of drops suggested is 2
+
+brt.burn.simp <- gbm.step(brt.cover.data,gbm.x=brt.simp.drop$pred.list[[1]], gbm.y=18, family = "gaussian",tree.complexity=5, learning.rate=0.01)
+summary(brt.burn.simp) # most important variables from the simplifed model are studyID, crust type, and TSF
+
+brt.rmse.simp.burn <- RMSE(brt.burn.simp$residuals)
+brt.rmse.simp.burn  # 5.241989-> lower than no simplified model 
+brt.mae.simp.burn <- MAE(brt.burn.simp$residuals)
+brt.mae.simp.burn # 2.748246 - > lower than non simplified model 
+total.mean <- mean(brt.cover.data$Burn.Cover)
+tss <- sum((brt.cover.data$Burn.Cover - total.mean)^2)
+rss <- sum(brt.burn.simp$residuals^2)
+brt.rsq.simp.burn <- 1-(rss/tss)
+brt.rsq.simp.burn # 0.8804039 --> better than non simplified model 
+
+brt.simp.drop <- gbm.simplify(brt.control.cover, n.drops = 5)
+# number of drops suggested is 5
+
+brt.control.simp <- gbm.step(brt.cover.data,gbm.x=brt.simp.drop$pred.list[[1]], gbm.y=21, family = "gaussian",tree.complexity=5, learning.rate=0.01)
+
+brt.rmse.simp.control <- RMSE(brt.control.simp$residuals)
+brt.rmse.simp.control  # 7.856503 --> lower than no simplified model 
+brt.mae.simp.control <- MAE(brt.control.simp$residuals)
+brt.mae.simp.control # 4.560986-- > lower than non simplified model 
+total.mean <- mean(brt.cover.data$Cont.Cover)
+tss <- sum((brt.cover.data$Cont.Cover - total.mean)^2)
+rss <- sum(brt.control.simp$residuals^2)
+brt.rsq.simp.control <- 1-(rss/tss)
+brt.rsq.simp.control # 0.0.8392986--> better than non simplified model 
+
+
+#  look at the interactions 
+find.int <- gbm.interactions(brt.burn.simp)
+find.int$rank.list
+
+# based on the interaction table, for the burned biocrust the varibales that interact are crustType*TSF + crustType*Location + TSF*Location + avg_avg_c*crustType + avg_rad*crustType + vapor*crustType + avg_rad*TSF + aridity:crustType 
+
+```
+
+```{R plot BRTs}
+
+burn.contributions <- brt.burn.simp$contributions
+burn.contributions$var <- c("Biocrust Type", "Location", "TSF", "Temperature", "Radiation", "Fire Regime", "Aridity", "Wind Speed", "Precipitation", "Water Vapor", "Plot Size", "Fire Type")
+
+pdf(file = "C:/Users/Brianne/OneDrive - San Diego State University (SDSU.EDU)/R WorkBooks/MetaAnalysis/figures/burnBRT.pdf")
+
+ggplot(data = burn.contributions, aes(x = reorder(var, rel.inf), y = rel.inf)) + geom_bar(stat = "identity", fill = "gray36")+ coord_flip() + theme_bw()+ labs(x = "Variables", y = "Relative Influence", title = "") + theme_classic() + theme(text = element_text(size = 20), legend.position = "none") 
+dev.off()
+
+control.contributions <- brt.control.simp$contributions
+
+pdf(file = "figures/controlBRT.pdf")
+ggplot(data = control.contributions, aes(x = reorder(var, rel.inf), y = rel.inf)) + geom_bar(stat = "identity", fill = "royalblue4")+ coord_flip() + theme_bw()+ labs(x = "Variables", y = "Relative Influence", title = "")+ theme_classic() + theme(legend.position = "none") 
+dev.off()
+
+
+```
+
+To perform the meta-analysis we used the metafor package. 
+```{R Calculate yi and vi for biocrust cover}
+data_es <- escalc(n1i = Burn.n, n2i = Cont.n, m1i = Burn.Cover, m2i = Cont.Cover, sd1i = Burn.se, sd2i = Cont.se, data = cover, measure = "ROM", "SMD")
+```
+
+First we used a random effect model to determine the overall response of biocrust to fire. We included study ID as a response variable  
+ 
+```{r random effect model}
+rand.eff.cover <- rma.mv(yi, vi, random = ~1|studyID, method = "REML", data = data_es)
+summary(rand.eff.cover)
+anova.rma(rand.eff.cover)
+rand.eff <- rma(yi, vi, method = "REML", data = data_es)
+regtest(rand.eff)
+
+
+ggplot(data = data_es, aes(y = yi, x = ))
+
+
+cooksd <- cooks.distance.rma.mv(rand.eff.cover)
+
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+
+data_es <- data_es[-c(25,169,172,191,224),]
+
+```
+
+We then created a multivariate metaregression with all the variables and interactions identified from the simplified BRT models. 
+
+```{r full model}
+
+m1 <- rma.mv(yi, vi, mods = ~ Location + Duration + Fire_Type + TSF + PlotSize.m.2. + crustType + aridity + avg_avg_c + avg_precip + avg_rad + avg_vapor + avg_wind + crustType*TSF + crustType*Location + TSF*Location + avg_avg_c*crustType + avg_rad*crustType + avg_vapor*crustType + avg_rad*TSF + aridity:crustType 
+, random = ~ 1|studyID, method = "REML", data = data_es)
+# AICc = 34587.5546 
+
+library(MuMIn)
+eval(metafor:::.MuMIn)
+
+res <- dredge(m1, trace=2, fixed = c("crustType", "TSF", "Fire_Type"),  m.max = 20)
+subset(res, delta <= 2, recalc.weights=FALSE)
+importance(res)
+
+# model inclues average temp + crust Type + Fire Type + Location + TSF + crustType:Location + crustType:TSF + Location:crustType
+
+best.mod <- rma.mv(yi, vi, mods = ~  avg_avg_c + crustType + TSF  + Fire_Type + Location + crustType:Location + TSF:crustType, random = ~ 1|studyID, method = "REML", data = data_es, test="z")
+
+summary(best.mod)
+```
+
+
+We then performed a post hoc Wald Type test on all the significant variables in the model 
+
+```{r Wald Test}
+anova.rma(best.mod, btt = "crustTypecyanobacteria")
+anova.rma(best.mod, btt = "crustTypelichen")
+anova.rma(best.mod, btt = "crustTypemixed")
+anova.rma(best.mod, btt = "crustTypemoss")
+anova.rma(best.mod, btt = "TSF")
+anova.rma(best.mod, btt = "Fire_TypePrescribed")
+anova.rma(best.mod, btt = "Fire_TypeWildfire")
+anova.rma(best.mod, btt = c("Fire_TypePrescribed", "Fire_TypeWildfire"))
+anova.rma(best.mod, btt = "FireRegimeI")
+anova.rma(best.mod, btt = "FireRegimeII")
+anova.rma(best.mod, btt = "FireRegimeIII")
+anova.rma(best.mod, btt = "FireRegimeIV")
+anova.rma(best.mod, btt = "crustTypelichen:LocationCalifornia")
+anova.rma(best.mod, btt = "crustTypelichen:LocationIdaho")
+anova.rma(best.mod, btt = "crustTypemixed:LocationIdaho")
+anova.rma(best.mod, btt = "crustTypelichen:LocationOregon")
+anova.rma(best.mod, btt = "crustTypelichen:LocationUtah")
+anova.rma(best.mod, btt = "crustTypecyanobacteria:TSF")
+anova.rma(best.mod, btt = "crustTypelichen:TSF")
+anova.rma(best.mod, btt = "crustTypemoss:TSF")
+```
+Based on the post hoc test the following variables are significant:
+Biocrust Type 
+TSF
+Fire Type 
+Fire Regime 
+Location:CrustType 
+TSF:Crust Type
+```{r determine QE for significant variables}
+rma.mv(yi, vi, mods = ~  crustType, random = ~ 1|studyID, method = "REML", data = data_es, test="z")
+rma.mv(yi, vi, mods = ~  TSF, random = ~ 1|studyID, method = "REML", data = data_es, test="z")
+
+```
+
+```{r look at relationship between burn and control cover}
+
+data_es$logical <- data_es$yi > 0
+
+pdf("C:/Users/Brianne/OneDrive - San Diego State University (SDSU.EDU)/R WorkBooks/MetaAnalysis/figures/Burn_Control.pdf")
+ggplot(data = data_es, aes(x = Cont.Cover, y = Burn.Cover)) + geom_point(aes(color = logical)) +  scale_color_manual(values = c("darkorange2", "darkorchid4"))+ theme_classic() + theme(text = element_text(size = 20)) + labs(x = "Control Cover (%)", y = "Burn Cover (%)") + geom_abline(color = "gray36") + theme(legend.position = "none")
+dev.off()
+
+library(lme4)
+
+burn.control.mod <-lmer(Burn.Cover ~ Cont.Cover + (1|studyID), data = data_es)
+summary(burn.control.mod)
+library(car)
+Anova(burn.control.mod)
+
+```
+```{r make plots for avg_temp}
+
+temp <- rma.mv(yi, vi, mods = ~  avg_avg_c, random = ~ 1|studyID, method = "REML", data = data_es, test="z")
+summary(temp)
+
+#temperature was not a significant moderating variable 
+
+```
+
+
+```{r make plots for TSF}
+data <- cbind(data_es, y.hat = predict.rma(tsf.ct))
+
+pdf("C:/Users/Brianne/OneDrive - San Diego State University (SDSU.EDU)/R WorkBooks/MetaAnalysis/figures/TSF.pdf")
+
+ggplot(data = data, aes(x = TSF, y = y.hat.pred)) + geom_point(aes(color = crustType)) + scale_color_manual(values = c("darkorchid4", "darkorange2","darkorchid4", "darkorchid4"))+ facet_grid(crustType~.) + geom_smooth(aes(color = crustType), formula = y ~ x, method = 'glm') + theme_bw() + theme(text = element_text(size = 15), legend.position = "none") + labs(y = "Effect Size", x = "TSF (months)") + facet_grid(crustType~.) + theme(strip.text.y = element_text(size = 8))  + 
+geom_hline(aes(yintercept=0), lty=2) 
+dev.off()
+
+data <- cbind(data_es, y.hat = predict.rma(tsf))
+
+pdf("C:/Users/Brianne/OneDrive - San Diego State University (SDSU.EDU)/R WorkBooks/MetaAnalysis/figures/TSF_all.pdf", width = 8, height = 2)
+ggplot(data = data, aes(x = TSF, y = y.hat.pred)) + geom_point(color = "darkorchid4")  + geom_smooth(color = "darkorchid4", formula = y ~ x, method = 'glm') + theme_bw() + theme(text = element_text(size = 15), legend.position = "none") + labs(x = "TSF (months)") + theme(strip.text.y = element_text(size = 8))+ 
+geom_hline(aes(yintercept=0), lty=2) 
+dev.off()
+
+TSF.mod <-lmer(Burn.Cover ~ TSF + (1|studyID), data = data_es)
+summary(TSF.mod)
+Anova(TSF.mod)
+
+tsf <- rma.mv(yi, vi, mods = ~  TSF, random = ~ 1|studyID, method = "REML", data = data_es, test="z")
+summary(tsf)
+
+tsf.ct <- rma.mv(yi, vi, mods = ~  crustType:TSF, random = ~ 1|studyID, method = "REML", data = data_es, test="z")
+summary(tsf.ct)
+
+```
+
+```{r cyanobavteria types}
+
+ct <- rma.mv(yi, vi, mods = ~  crustType, random = ~ 1|studyID, method = "REML", data = data_es)
+summary(ct)
+
+
+cyano.int <- as.numeric(ct$beta[2,])
+cyano.ci.ub <- ct$ci.ub[2]
+cyano.ci.lb <- ct$ci.lb[2]
+
+lichen.int <- as.numeric(ct$beta[3,])
+lichen.ci.ub <- ct$ci.ub[3]
+lichen.ci.lb <- ct$ci.lb[3]
+
+
+#mixed.int <- as.numeric(ct$beta[4,])
+#mixed.ci.ub <- ct$ci.ub[4]
+#mixed.ci.lb <- ct$ci.lb[4]
+
+bryophyte.int <- as.numeric(ct$beta[1,])
+bryophyte.ci.ub <- ct$ci.ub[1]
+bryophyte.ci.lb <- ct$ci.lb[1]
+
+unk.int <- as.numeric(ct$beta[4,])
+unk.ci.ub <- ct$ci.ub[4]
+unk.ci.lb <- ct$ci.lb[4]
+
+all.int <- as.numeric(rand.eff.cover$beta[1,])
+all.ci.ub <- rand.eff.cover$ci.ub[1]
+all.ci.lb <- rand.eff.cover$ci.lb[1]
+
+model_dat <- rbind(data.frame(group="Bryophyte (N=66))", estimate=bryophyte.int,
+ci_low=bryophyte.ci.lb, ci_up=bryophyte.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Cyanobacteria/Algae (N=24)", estimate=cyano.int,
+ci_low=cyano.ci.lb, ci_up=cyano.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Lichen (N=118)", estimate=lichen.int,
+ci_low=lichen.ci.lb, ci_up=lichen.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE), 
+data.frame(group="Unknown (N=23)", estimate=unk.int,
+ci_low=unk.ci.lb, ci_up=unk.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE), 
+data.frame(group="All Data (N=237)", estimate=all.int,
+ci_low=all.ci.lb, ci_up=all.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE))
+
+pdf("C:/Users/Brianne/OneDrive - San Diego State University (SDSU.EDU)/R WorkBooks/MetaAnalysis/figures/crust_type.pdf")
+ggplot(model_dat, aes(x=group,y=estimate,ymax=ci_up,ymin=ci_low, color = group)) +
+geom_pointrange() +
+coord_flip() + 
+geom_hline(aes(yintercept=0), lty=2) + 
+labs(y="Effect size", x = "") +
+theme_bw() + 
+theme(panel.grid.minor=element_blank(), 
+panel.grid.major=element_line(color = "white"),
+axis.title=element_text(size=18, color = "black"),
+axis.text=element_text(size=16, color = "black"), legend.position = "none", text = element_text(size = 20)) +
+    scale_color_manual(values=c("gray36", "darkorange2", "gray36","gray36", "darkorange2")) +
+  theme(
+    panel.background = element_rect(fill = "transparent"), # bg of the panel
+    plot.background = element_rect(fill = "transparent", color = NA)
+  )
+dev.off()
+
+
+```
+```{r fire type }
+
+ft <- rma.mv(yi, vi, mods = ~ Fire_Type, random = ~ 1|studyID, method = "REML", data = data_es)
+summary(ft)
+confint.rma.mv(ft)
+
+p.int <- as.numeric(ft$beta[1,])
+p.ci.ub <- ft$ci.ub[1]
+p.ci.lb <- ft$ci.lb[1]
+
+w.int <- as.numeric(ct$beta[2,])
+w.ci.ub <- ft$ci.ub[2]
+w.ci.lb <- ft$ci.lb[2]
+
+all.int <- as.numeric(rand.eff.cover$beta[1,])
+all.ci.ub <- rand.eff.cover$ci.ub[1]
+all.ci.lb <- rand.eff.cover$ci.lb[1]
+
+model_dat <- rbind(data.frame(group="Prescribed Fire (N= 93)", estimate=p.int,
+ci_low=p.ci.lb, ci_up=p.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Wildfire (143)", estimate=p.int,
+ci_low=p.ci.lb, ci_up=p.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="All Data (N=237)", estimate=all.int,
+ci_low=all.ci.lb, ci_up=all.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE))
+
+pdf("C:/Users/Brianne/OneDrive - San Diego State University (SDSU.EDU)/R WorkBooks/MetaAnalysis/figures/fire_type.pdf")
+ggplot(model_dat, aes(x=group,y=estimate,ymax=ci_up,ymin=ci_low, color = group)) +
+geom_pointrange() +
+coord_flip() + 
+geom_hline(aes(yintercept=0), lty=2) + 
+labs(y="Effect size", x = "") +
+theme_bw() + 
+theme(panel.grid.minor=element_blank(), 
+panel.grid.major=element_line(color = "white"),
+axis.title=element_text(size=14, color = "black"),
+axis.text=element_text(size=12, color = "black"), legend.position = "none", text = element_text(size = 20)) +
+    scale_color_manual(values=c("gray36", "gray36", "gray36")) +
+  theme(
+    panel.background = element_rect(fill = "transparent"), # bg of the panel
+    plot.background = element_rect(fill = "transparent", color = NA)
+  )
+dev.off()
+
+```
+
+```{r fire regime }
+
+fr <- rma.mv(yi, vi, mods = ~ Duration, random = ~ 1|studyID, method = "REML", data = data_es)
+summary(fr)
+
+i.int <- as.numeric(fr$beta[2,])
+i.ci.ub <- fr$ci.ub[2]
+i.ci.lb <- fr$ci.lb[2]
+
+ii.int <- as.numeric(fr$beta[3,])
+ii.ci.ub <- fr$ci.ub[3]
+ii.ci.lb <- fr$ci.lb[3]
+
+iii.int <- as.numeric(fr$beta[4,])
+iii.ci.ub <- fr$ci.ub[4]
+iii.ci.lb <- fr$ci.lb[4]
+
+#iv.int <- as.numeric(fr$beta[5,])
+#iv.ci.ub <- fr$ci.ub[5]
+#iv.ci.lb <-fr$ci.lb[5]
+
+#v.int <- as.numeric(fr$beta[6,])
+#v.ci.ub <- fr$ci.ub[6]
+#v.ci.lb <- fr$ci.lb[6]
+
+all.int <- as.numeric(rand.eff.cover$beta[1,])
+all.ci.ub <- rand.eff.cover$ci.ub[1]
+all.ci.lb <- rand.eff.cover$ci.lb[1]
+
+# don't include figure, simply say regimes exhibited a similar response. 
+
+model_dat <- rbind(data.frame(group="long", estimate=i.int,
+ci_low=i.ci.lb, ci_up=i.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="medium", estimate=ii.int,
+ci_low=ii.ci.lb, ci_up=ii.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="short", estimate=iii.int,
+ci_low=iii.ci.lb, ci_up=iii.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE), 
+data.frame(group="All Data (N=237)", estimate=all.int,
+ci_low=all.ci.lb, ci_up=all.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE))
+
+pdf("C:/Users/Brianne/OneDrive - San Diego State University (SDSU.EDU)/R WorkBooks/MetaAnalysis/figures/fire_regime.pdf")
+ggplot(model_dat, aes(x=group,y=estimate,ymax=ci_up,ymin=ci_low, color = group)) +
+geom_pointrange() +
+coord_flip() + 
+geom_hline(aes(yintercept=0), lty=2) + 
+labs(y="Effect size", x = "") +
+theme_bw() + 
+theme(panel.grid.minor=element_blank(), 
+panel.grid.major=element_line(color = "white"),
+axis.title=element_text(size=18, color = "black"),
+axis.text=element_text(size=16, color = "black"), legend.position = "none", text = element_text(size = 20)) +
+    scale_color_manual(values=c("darkorchid4", "darkorchid4","darkorchid4", "darkorchid4","darkorchid4","darkorange2")) +
+  theme(
+    panel.background = element_rect(fill = "transparent"), # bg of the panel
+    plot.background = element_rect(fill = "transparent", color = NA)
+  )
+dev.off()
+```
+
+
+
+```{r plot just lichen by location}
+
+loc.ct <- rma.mv(yi, vi, mods = ~ Location, random = ~ 1|studyID, method = "REML", data = data_es, test="z")
+summary(loc.ct)
+anova.rma(loc.ct)
+Anova(loc.ct)
+
+
+CA.int <- as.numeric(m1$beta[25,])
+CA.ci.ub <- m1$ci.ub[25]
+CA.ci.lb <- m1$ci.lb[25]
+
+Idaho.int <- as.numeric(m1$beta[26,])
+Idaho.ci.ub <- m1$ci.ub[26]
+Idaho.ci.lb <- m1$ci.lb[26]
+
+Oregon.int <- as.numeric(m1$beta[27,])
+Oregon.ci.ub <- m1$ci.ub[27]
+Oregon.ci.lb <- m1$ci.lb[27]
+
+Utah.int <- as.numeric(m1$beta[28,])
+Utah.ci.ub <- m1$ci.ub[28]
+Utah.ci.lb <- m1$ci.lb[28]
+
+all.int <- as.numeric(rand.eff.cover$beta)
+all.ci.ub <- rand.eff.cover$ci.ub
+all.ci.lb <- rand.eff.cover$ci.lb
+
+model_dat <- rbind(data.frame(group="California Lichen (N=5)", estimate=CA.int,
+ci_low=CA.ci.lb, ci_up=CA.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Idaho Lichen (N=13)", estimate=Idaho.int,
+ci_low=Idaho.ci.lb, ci_up=Idaho.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Oregon Lichen (N=8)", estimate=Oregon.int,
+ci_low=Oregon.ci.lb, ci_up=Oregon.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Utah Lichen (N=35)", estimate=Utah.int,
+ci_low=Utah.ci.lb, ci_up=Utah.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE), 
+data.frame(group="All Data (N=237)", estimate=all.int,
+ci_low=all.ci.lb, ci_up=all.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE))
+
+pdf("C:/Users/Brianne/OneDrive - San Diego State University (SDSU.EDU)/R WorkBooks/MetaAnalysis/figures/lichen_location.pdf")
+ggplot(model_dat, aes(x=group,y=estimate,ymax=ci_up,ymin=ci_low, color = group)) +
+geom_pointrange() +
+coord_flip() + 
+geom_hline(aes(yintercept=0), lty=2) + 
+labs(y="Effect size", x = "") +
+theme_bw() + 
+theme(panel.grid.minor=element_blank(), 
+panel.grid.major=element_line(color = "white"),
+axis.title=element_text(size=14, color = "black"),
+axis.text=element_text(size=12, color = "black"), legend.position = "none", text = element_text(size = 20)) +
+    scale_color_manual(values=c("gray36", "darkorange2", "gray36", "gray36","darkorange2")) +
+  theme(
+    panel.background = element_rect(fill = "transparent"), # bg of the panel
+    plot.background = element_rect(fill = "transparent", color = NA)
+  )
+dev.off()
+
+
+
+```
+
+
+```{r studyID}
+si <- rma.mv(yi, vi, mods = ~ studyID,  method = "REML", data = data_es)
+summary(si)
+
+Bowker.int <- as.numeric(si$beta[2,])
+Bowker.ci.ub <- si$ci.ub[2]
+Bowker.ci.lb <- si$ci.lb[2]
+
+Calabria.int <- as.numeric(si$beta[3,])
+Calabria.ci.ub <- si$ci.ub[3]
+Calabria.ci.lb <- si$ci.lb[3]
+
+Davies.int <- as.numeric(si$beta[4,])
+Davies.ci.ub <- si$ci.ub[4]
+Davies.ci.lb <- si$ci.lb[4]
+
+Dewit.int <- as.numeric(si$beta[5,])
+Dewit.ci.ub <- si$ci.ub[5]
+Dewit.ci.lb <- si$ci.lb[5]
+
+Eldridge.int <- as.numeric(si$beta[6,])
+Eldridge.ci.ub <- si$ci.ub[6]
+Eldridge.ci.lb <- si$ci.lb[6]
+
+Evangelista.int <- as.numeric(si$beta[7,])
+Evangelista.ci.ub <- si$ci.ub[7]
+Evangelista.ci.lb <- si$ci.lb[7]
+
+Ford.int <- as.numeric(si$beta[8,])
+Ford.ci.ub <- si$ci.ub[8]
+Ford.ci.lb <- si$ci.lb[8]
+
+Haubensak.int <- as.numeric(si$beta[9,])
+Haubensak.ci.ub <- si$ci.ub[9]
+Haubensak.ci.lb <- si$ci.lb[9]
+
+Hilty.int <- as.numeric(si$beta[10,])
+Hilty.ci.ub <- si$ci.ub[10]
+Hilty.ci.lb <- si$ci.lb[10]
+
+Huffman.int <- as.numeric(si$beta[11,])
+Huffman.ci.ub <- si$ci.ub[11]
+Huffman.ci.lb <- si$ci.lb[11]
+
+Johansson.int <- as.numeric(si$beta[12,])
+Johansson.ci.ub <- si$ci.ub[12]
+Johansson.ci.lb <- si$ci.lb[12]
+
+Johansson2.int <- as.numeric(si$beta[13,])
+Johansson2.ci.ub <- si$ci.ub[13]
+Johansson2.ci.lb <- si$ci.lb[13]
+
+Michel.int <- as.numeric(si$beta[14,])
+Michel.ci.ub <- si$ci.ub[14]
+Michel.ci.lb <- si$ci.lb[14]
+
+Nicholas.int <- as.numeric(si$beta[15,])
+Nicholas.ci.ub <- si$ci.ub[15]
+Nicholas.ci.lb <- si$ci.lb[15]
+
+Palmer.int <- as.numeric(si$beta[16,])
+Palmer.ci.ub <- si$ci.ub[16]
+Palmer.ci.lb <- si$ci.lb[16]
+
+Root.int <- as.numeric(si$beta[17,])
+Root.ci.ub <- si$ci.ub[17]
+Root.ci.lb <- si$ci.lb[17]
+
+Schulten.int <- as.numeric(si$beta[18,])
+Schulten.ci.ub <- si$ci.ub[18]
+Schulten.ci.lb <- si$ci.lb[18]
+
+Strong.int <- as.numeric(si$beta[19,])
+Strong.ci.ub <- si$ci.ub[19]
+Strong.ci.lb <- si$ci.lb[19]
+
+
+all.int <- as.numeric(rand.eff.cover$beta[1,])
+all.ci.ub <- rand.eff.cover$ci.ub[1]
+all.ci.lb <- rand.eff.cover$ci.lb[1]
+
+model_dat <- rbind(data.frame(group="Bowker et al. 2004", estimate=Bowker.int,
+ci_low=Bowker.ci.lb, ci_up=Bowker.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Calabria et al. 2016", estimate=Calabria.int,
+ci_low=Calabria.ci.lb, ci_up=Calabria.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Davies and Dean 2019", estimate=Davies.int,
+ci_low=Davies.ci.lb, ci_up=Davies.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Dettweiler-Robinson et al. 2013", estimate=Dewit.int,
+ci_low=Dewit.ci.lb, ci_up=Dewit.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Eldridge and Bradstock 1994", estimate=Eldridge.int,
+ci_low=Eldridge.ci.lb, ci_up=Eldridge.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE), 
+data.frame(group="Evangelista et al. 2004", estimate=Evangelista.int,
+ci_low=Evangelista.ci.lb, ci_up=Evangelista.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE), 
+data.frame(group="Ford and Johnson 2006", estimate=Ford.int,
+ci_low=Ford.ci.lb, ci_up=Ford.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Haubensak et al. 2008", estimate=Haubensak.int,
+ci_low=Haubensak.ci.lb, ci_up=Haubensak.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Hilty et al. 2004", estimate=Hilty.int,
+ci_low=Hilty.ci.lb, ci_up=Hilty.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Huffman et al. 2013", estimate=Huffman.int,
+ci_low=Huffman.ci.lb, ci_up=Huffman.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE), 
+data.frame(group="Johansson and Reich 2005", estimate=Johansson.int,
+ci_low=Johansson.ci.lb, ci_up=Johansson.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Johansson et al. 1984", estimate=Johansson2.int,
+ci_low=Johansson2.ci.lb, ci_up=Johansson2.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE), 
+data.frame(group="Michel et al. 2012", estimate=Michel.int,
+ci_low=Michel.ci.lb, ci_up=Michel.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE), 
+data.frame(group="Nicholas et al. 2009", estimate=Nicholas.int,
+ci_low=Nicholas.ci.lb, ci_up=Nicholas.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Palmer et al. in prep", estimate=Palmer.int,
+ci_low=Palmer.ci.lb, ci_up=Palmer.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Root et al. 2017", estimate=Root.int,
+ci_low=Root.ci.lb, ci_up=Root.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE),
+data.frame(group="Schulten 1985", estimate=Schulten.int,
+ci_low=Schulten.ci.lb, ci_up=Schulten.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE), 
+data.frame(group="Strong et al. 2010", estimate=Strong.int,
+ci_low=Strong.ci.lb, ci_up=Strong.ci.ub,
+row.names=FALSE, stringsAsFactors=TRUE))
+
+pdf("C:/Users/Brianne/OneDrive - San Diego State University (SDSU.EDU)/R WorkBooks/MetaAnalysis/figures/studyID.pdf")
+ggplot(model_dat, aes(x=group,y=estimate,ymax=ci_up,ymin=ci_low, color = group)) +
+geom_pointrange() +
+coord_flip() + 
+geom_hline(aes(yintercept=0), lty=2) + 
+labs(y="Effect size", x = "") +
+theme_bw() + 
+theme(panel.grid.minor=element_blank(), 
+panel.grid.major=element_line(color = "white"),
+axis.title=element_text(size=18, color = "black"),
+axis.text=element_text(size=16, color = "black"), legend.position = "none", text = element_text(size = 20))  +
+  theme(
+    panel.background = element_rect(fill = "transparent"), # bg of the panel
+    plot.background = element_rect(fill = "transparent", color = NA)
+  )+
+    scale_color_manual(values=c("darkorchid4", "gray36", "darkorange2", "darkorchid4", "darkorchid4", "darkorange2", "gray36", "darkorange2", "gray36", "gray36", "gray36", "darkorange2", "darkorchid4", "gray36", "darkorchid4", "darkorchid4", "darkorange2", "darkorange2"))
+dev.off()
+
+```
