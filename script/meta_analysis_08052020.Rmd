@@ -35,11 +35,7 @@ In total I used 237 unique experiments from twenty individual studies spanning 1
 cover <- read.csv("C:/Users/Brianne/Documents/Biocrust-and-fire-meta-analysis/data/FireMA_June2020.csv") # control is unburned
 # make TSF a number
 cover$TSF <- as.integer(cover$TSF)
-cover <- cover[-(7)]
-
-#cover <- cover %>% filter(ï..Authors != "Palmer")
-
-#cover <- cover %>% filter(ï..Authors != "Strong")
+cover <- cover[-8] # remove duration
 
 ``` 
 
@@ -55,7 +51,7 @@ brt.cover.data$Fire_Type <- as.factor(brt.cover.data$Fire_Type)
 brt.cover.data$PlotSize.m.2. <- as.factor(brt.cover.data$PlotSize.m.2.)
 brt.cover.data$crustType <- as.factor(brt.cover.data$crustType)
 brt.cover.data$Location <- as.factor(brt.cover.data$Location)
-brt.cover.data$Duration <- as.factor(brt.cover.data$Duration)
+brt.cover.data$FireRegime <- as.factor(brt.cover.data$FireRegime)
 
 # fit the model 
 
@@ -192,6 +188,7 @@ ggplot(data = burn.contributions, aes(x = reorder(var, rel.inf), y = rel.inf)) +
 dev.off()
 
 control.contributions <- brt.control.simp$contributions
+control.contributions$var <- rownames(control.contributions)
 
 pdf(file = "C:/Users/Brianne/Documents/Biocrust-and-fire-meta-analysis/figures/controlBRT.pdf")
 ggplot(data = control.contributions, aes(x = reorder(var, rel.inf), y = rel.inf)) + geom_bar(stat = "identity", fill = "royalblue4")+ coord_flip() + theme_bw()+ labs(x = "Variables", y = "Relative Influence", title = "")+ theme_classic() + theme(legend.position = "none") 
@@ -222,7 +219,7 @@ plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot c
 abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
 text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
 
-data_es <- data_es[-c(25,169,172,191,224),]
+data_es <- data_es[-c(219,218,169,161, 165),]
 
 
 ```
@@ -231,7 +228,7 @@ We then created a multivariate metaregression with all the variables and interac
 
 ```{r full model}
 
-m1 <- rma.mv(yi, vi, mods = ~ Location + Duration + Fire_Type + TSF + PlotSize.m.2. + crustType + aridity + avg_avg_c + avg_precip + avg_rad + avg_vapor + avg_wind + crustType*TSF + crustType*Location + TSF*Location + avg_avg_c*crustType + avg_rad*crustType + avg_vapor*crustType + avg_rad*TSF + aridity:crustType 
+m1 <- rma.mv(yi, vi, mods = ~ Location + FireRegime + Fire_Type + TSF + PlotSize.m.2. + crustType + aridity + avg_avg_c + avg_precip + avg_rad + avg_vapor + avg_wind + crustType*TSF + crustType*Location + TSF*Location + avg_avg_c*crustType + avg_rad*crustType + avg_vapor*crustType + avg_rad*TSF + aridity:crustType 
 , random = ~ 1|studyID, method = "REML", data = data_es)
 # AICc = 34587.5546 
 
@@ -249,31 +246,6 @@ best.mod <- rma.mv(yi, vi, mods = ~  avg_avg_c + crustType + TSF  + Fire_Type + 
 summary(best.mod)
 ```
 
-
-We then performed a post hoc Wald Type test on all the significant variables in the model 
-
-```{r Wald Test}
-anova.rma(best.mod, btt = "crustTypecyanobacteria")
-anova.rma(best.mod, btt = "crustTypelichen")
-anova.rma(best.mod, btt = "crustTypemixed")
-anova.rma(best.mod, btt = "crustTypemoss")
-anova.rma(best.mod, btt = "TSF")
-anova.rma(best.mod, btt = "Fire_TypePrescribed")
-anova.rma(best.mod, btt = "Fire_TypeWildfire")
-anova.rma(best.mod, btt = c("Fire_TypePrescribed", "Fire_TypeWildfire"))
-anova.rma(best.mod, btt = "FireRegimeI")
-anova.rma(best.mod, btt = "FireRegimeII")
-anova.rma(best.mod, btt = "FireRegimeIII")
-anova.rma(best.mod, btt = "FireRegimeIV")
-anova.rma(best.mod, btt = "crustTypelichen:LocationCalifornia")
-anova.rma(best.mod, btt = "crustTypelichen:LocationIdaho")
-anova.rma(best.mod, btt = "crustTypemixed:LocationIdaho")
-anova.rma(best.mod, btt = "crustTypelichen:LocationOregon")
-anova.rma(best.mod, btt = "crustTypelichen:LocationUtah")
-anova.rma(best.mod, btt = "crustTypecyanobacteria:TSF")
-anova.rma(best.mod, btt = "crustTypelichen:TSF")
-anova.rma(best.mod, btt = "crustTypemoss:TSF")
-```
 Based on the post hoc test the following variables are significant:
 Biocrust Type 
 TSF
@@ -463,7 +435,7 @@ dev.off()
 
 ```{r fire regime }
 
-fr <- rma.mv(yi, vi, mods = ~ Duration, random = ~ 1|studyID, method = "REML", data = data_es)
+fr <- rma.mv(yi, vi, mods = ~ FireRegime, random = ~ 1|studyID, method = "REML", data = data_es)
 summary(fr)
 
 i.int <- as.numeric(fr$beta[2,])
@@ -531,7 +503,7 @@ dev.off()
 loc.ct <- rma.mv(yi, vi, mods = ~ Location, random = ~ 1|studyID, method = "REML", data = data_es, test="z")
 summary(loc.ct)
 anova.rma(loc.ct)
-Anova(loc.ct)
+
 
 
 CA.int <- as.numeric(m1$beta[25,])
